@@ -1,0 +1,384 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  EMPLOYER
+  APPLICANT
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  PENDING
+}
+
+enum ExperienceLevel {
+  ENTRY
+  MID
+  SENIOR
+  EXECUTIVE
+}
+
+enum CompanySize {
+  SIZE_1_10
+  SIZE_11_50
+  SIZE_51_200
+  SIZE_201_500
+  SIZE_500_PLUS
+}
+
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum PlanType {
+  FREE
+  STANDARD
+  PREMIUM
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+}
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  FREELANCE
+  INTERNSHIP
+}
+
+enum LocationType {
+  ONSITE
+  REMOTE
+  HYBRID
+}
+
+enum JobStatus {
+  DRAFT
+  PENDING_APPROVAL
+  ACTIVE
+  EXPIRED
+  CLOSED
+  REJECTED
+}
+
+enum Visibility {
+  STANDARD
+  FEATURED
+  INTERNAL
+}
+
+enum ApplicationMethod {
+  WORKFLAT
+  EXTERNAL
+}
+
+enum ApplicationStatus {
+  PENDING
+  REVIEWING
+  SHORTLISTED
+  INTERVIEW
+  OFFER
+  HIRED
+  REJECTED
+  WITHDRAWN
+}
+
+enum InterviewType {
+  PHONE
+  VIDEO
+  ONSITE
+}
+
+enum NotificationType {
+  JOB_ALERT
+  APPLICATION_UPDATE
+  INTERVIEW_INVITE
+  SUBSCRIPTION_EXPIRING
+  SUBSCRIPTION_ACTIVATED
+  JOB_STATUS_UPDATE
+  MESSAGE
+}
+
+enum ContentType {
+  BLOG
+  FAQ
+  PAGE
+}
+
+enum ContentStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum SalaryPeriod {
+  YEARLY
+  MONTHLY
+  HOURLY
+}
+
+enum PaymentMethod {
+  STRIPE
+  PAYPAL
+}
+
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+model User {
+  id             String     @id @default(uuid())
+  email          String     @unique
+  password_hash  String
+  role           Role       @default(APPLICANT)
+  status         UserStatus @default(PENDING)
+  email_verified Boolean    @default(false)
+  created_at     DateTime   @default(now())
+  updated_at     DateTime   @updatedAt
+  last_login     DateTime?
+
+  applicantProfile ApplicantProfile?
+  employerProfile  EmployerProfile?
+  subscription     Subscription[]
+  notifications    Notification[]
+  content          Content[]
+  transactions     Transaction[]
+  refresh_tokens   RefreshToken[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id         String   @id @default(uuid())
+  token      String   @unique
+  user_id    String
+  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  expires_at DateTime
+  created_at DateTime @default(now())
+
+  @@map("refresh_tokens")
+}
+
+model ApplicantProfile {
+  id                  String           @id @default(uuid())
+  user_id             String           @unique
+  user                User             @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  first_name          String
+  last_name           String
+  phone               String?
+  nationality         String?          // <- new
+  location            String?
+  title               String?          // <- new
+  bio                 String?
+  skills              String[]
+  years_experience    Int?             // <- optional
+  education           String?          // <- new
+  linkedin_url        String?          // <- new
+  portfolio_url       String?          // <- new
+  experience_level    ExperienceLevel?
+  desired_salary Int?  // rename salary_expectation → desired_salary
+  preferred_locations String[]
+  visa_status         String?
+  relocation_ready    Boolean          @default(false)
+  profile_completion  Int              @default(0)
+  resume_url          String?
+  avatar_url          String?
+
+  applications Application[]
+  saved_jobs   SavedJob[]
+}
+
+model EmployerProfile {
+  id                  String             @id @default(uuid())
+  user_id             String             @unique
+  user                User               @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  company_name        String
+  company_description String?
+  industry            String?
+  company_size        CompanySize?
+  website             String?
+  logo_url            String?
+  location            String?
+  verification_status VerificationStatus @default(PENDING)
+  created_at          DateTime           @default(now())
+
+  jobs Job[]
+
+  @@map("employer_profiles")
+}
+
+model Subscription {
+  id                     String             @id @default(uuid())
+  employer_id            String
+  employer               User               @relation(fields: [employer_id], references: [id], onDelete: Cascade)
+  plan_type              PlanType           @default(FREE)
+  status                 SubscriptionStatus @default(ACTIVE)
+  start_date             DateTime           @default(now())
+  end_date               DateTime?
+  jobs_limit             Int                @default(1)
+  jobs_used              Int                @default(0)
+  featured_jobs_limit    Int                @default(0)
+  featured_jobs_used     Int                @default(0)
+  stripe_subscription_id String?
+  paypal_subscription_id String?
+  created_at             DateTime           @default(now())
+  updated_at             DateTime           @updatedAt
+
+  transactions Transaction[]
+
+  @@map("subscriptions")
+}
+
+model Job {
+  id               String           @id @default(uuid())
+  employer_id      String?
+  employer         EmployerProfile? @relation(fields: [employer_id], references: [id], onDelete: SetNull)
+  posted_by_admin  Boolean          @default(false)
+  admin_id         String?
+
+  title            String
+  description      String
+  requirements     String?
+  responsibilities String?
+  benefits         String?
+
+  employment_type    EmploymentType
+  location_type      LocationType   @default(ONSITE)
+  location           String
+  country            String         @default("US")
+  salary_min         Int?
+  salary_max         Int?
+  salary_currency    String         @default("USD")
+  salary_period      SalaryPeriod   @default(YEARLY)
+
+  industry           String?
+  category           String?
+  tags               String[]
+
+  application_method ApplicationMethod @default(WORKFLAT)
+  external_url       String?
+
+  status         JobStatus  @default(DRAFT)
+  visibility     Visibility @default(STANDARD)
+
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @updatedAt
+  published_at   DateTime?
+  expires_at     DateTime?
+  featured_until DateTime?
+
+  view_count        Int @default(0)
+  application_count Int @default(0)
+
+  approved_by      String?
+  reviewed_by      String?
+  rejection_reason String?
+
+  applications Application[]
+  saved_by     SavedJob[]
+
+  @@map("jobs")
+}
+
+model Application {
+  id           String            @id @default(uuid())
+  job_id       String
+  job          Job               @relation(fields: [job_id], references: [id], onDelete: Cascade)
+  applicant_id String
+  applicant    ApplicantProfile  @relation(fields: [applicant_id], references: [id], onDelete: Cascade)
+  status       ApplicationStatus @default(PENDING)
+  cover_letter String?
+  resume_url   String?
+  answers      Json?
+
+  applied_at     DateTime  @default(now())
+  last_updated   DateTime  @updatedAt
+  employer_notes String?
+
+  interview_date DateTime?
+  interview_type InterviewType?
+  interview_link String?
+
+  @@unique([job_id, applicant_id])
+  @@map("applications")
+}
+
+model SavedJob {
+  id           String           @id @default(uuid())
+  applicant_id String
+  applicant    ApplicantProfile @relation(fields: [applicant_id], references: [id], onDelete: Cascade)
+  job_id       String
+  job          Job              @relation(fields: [job_id], references: [id], onDelete: Cascade)
+  saved_at     DateTime         @default(now())
+
+  @@unique([applicant_id, job_id])
+  @@map("saved_jobs")
+}
+
+model Notification {
+  id         String           @id @default(uuid())
+  user_id    String
+  user       User             @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  type       NotificationType
+  title      String
+  message    String
+  data       Json?
+  is_read    Boolean          @default(false)
+  created_at DateTime         @default(now())
+
+  @@map("notifications")
+}
+
+model Content {
+  id               String        @id @default(uuid())
+  type             ContentType
+  slug             String        @unique
+  title            String
+  content          String
+  excerpt          String?
+  featured_image   String?
+  author_id        String
+  author           User          @relation(fields: [author_id], references: [id], onDelete: Cascade)
+  status           ContentStatus @default(DRAFT)
+  published_at     DateTime?
+  created_at       DateTime      @default(now())
+  updated_at       DateTime      @updatedAt
+  meta_title       String?
+  meta_description String?
+
+  @@map("content")
+}
+
+model Transaction {
+  id                  String            @id @default(uuid())
+  employer_id         String
+  employer            User              @relation(fields: [employer_id], references: [id], onDelete: Cascade)
+  subscription_id     String?
+  subscription        Subscription?     @relation(fields: [subscription_id], references: [id], onDelete: SetNull)
+  amount              Float
+  currency            String            @default("USD")
+  payment_method      PaymentMethod
+  payment_provider_id String?
+  status              TransactionStatus @default(PENDING)
+  description         String?
+  created_at          DateTime          @default(now())
+
+  @@map("transactions")
+}
