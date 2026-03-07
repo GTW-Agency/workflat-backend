@@ -9,13 +9,13 @@ export interface JwtPayload {
   exp?: number;
 }
 
-// Fixed: Made all user properties optional with ? to match auth middleware
+// Fix: Match the exact type from auth.ts middleware
 export interface AuthenticatedRequest extends Request {
   user?: {
     id: string;
     email: string;
     role: Role;
-    status: UserStatus;
+    status: UserStatus;  // Changed from string to UserStatus
     applicantProfile?: any;
     employerProfile?: any;
     subscription?: any[];

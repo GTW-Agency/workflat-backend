@@ -1,16 +1,15 @@
-import { Router, Response, NextFunction } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import prisma from '../config/database';
 import bcrypt from 'bcryptjs';
 import { authenticate } from '../middleware/authenticate';
 import { uploadImage } from '../config/cloudinary';
-import { AuthenticatedRequest } from '../types';
 
 const router = Router();
 
 router.use(authenticate);
 
 // GET /api/v1/users/me
-router.get('/me', async (req: AuthenticatedRequest, res: Response) => {
+router.get('/me', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user!.id },
@@ -29,7 +28,7 @@ router.get('/me', async (req: AuthenticatedRequest, res: Response) => {
 });
 
 // PUT /api/v1/users/me
-router.put('/me', async (req: AuthenticatedRequest, res: Response) => {
+router.put('/me', async (req: Request, res: Response, next: NextFunction) => {
   try {
     // Only allow email update here; profile updates go to /applicants or /employers
     const { email } = req.body;
@@ -51,7 +50,7 @@ router.put('/me', async (req: AuthenticatedRequest, res: Response) => {
 });
 
 // POST /api/v1/users/me/avatar
-router.post('/me/avatar', uploadImage.single('avatar'), async (req: AuthenticatedRequest, res: Response) => {
+router.post('/me/avatar', uploadImage.single('avatar'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.file) { res.status(400).json({ success: false, error: 'No file' }); return; }
     const url = (req.file as any).secure_url;
@@ -69,7 +68,7 @@ router.post('/me/avatar', uploadImage.single('avatar'), async (req: Authenticate
 });
 
 // DELETE /api/v1/users/me
-router.delete('/me', async (req: AuthenticatedRequest, res: Response) => {
+router.delete('/me', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { password } = req.body;
     const user = await prisma.user.findUnique({ where: { id: req.user!.id } });

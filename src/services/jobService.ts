@@ -1,7 +1,7 @@
 import { prisma } from '../config/prisma';
 import { AppError } from '../middleware/errorHandler';
 import { notificationService } from './notificationService';
-import { JobStatus, JobVisibility } from '@prisma/client';
+import { JobStatus, Visibility } from '@prisma/client';  // Changed from JobVisibility to Visibility
 
 const PLAN_LIMITS = {
   FREE:     { jobs: 1,        featured: 0, durationDays: 30 },
@@ -173,7 +173,7 @@ export class JobService {
     return prisma.job.findMany({
       where: {
         status: 'ACTIVE',
-        visibility: 'FEATURED' as JobVisibility,
+        visibility: 'FEATURED' as Visibility,  // Changed from JobVisibility to Visibility
         featured_until: { gt: new Date() },
       },
       include: {

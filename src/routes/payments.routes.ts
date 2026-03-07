@@ -1,14 +1,13 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../middleware/authenticate';
 import { authorize } from '../middleware/authorize';
 import paymentService from '../services/payment.service';
-import { AuthenticatedRequest } from '../types';
 import express from 'express';
 
 const router = Router();
 
 // POST /api/v1/payments/create-subscription  (raw body needed for Stripe webhook)
-router.post('/create-subscription', authenticate, authorize('EMPLOYER'), async (req: AuthenticatedRequest, res: Response) => {
+router.post('/create-subscription', authenticate, authorize('EMPLOYER'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { plan } = req.body;
     const result = await paymentService.createStripeCheckout(req.user!.id, plan);
@@ -19,7 +18,7 @@ router.post('/create-subscription', authenticate, authorize('EMPLOYER'), async (
 });
 
 // POST /api/v1/payments/webhook/stripe  (raw body, no JSON parsing)
-router.post('/webhook/stripe', express.raw({ type: 'application/json' }), async (req: Request, res: Response) => {
+router.post('/webhook/stripe', express.raw({ type: 'application/json' }), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const signature = req.headers['stripe-signature'] as string;
     const result = await paymentService.handleStripeWebhook(req.body, signature);
@@ -30,7 +29,7 @@ router.post('/webhook/stripe', express.raw({ type: 'application/json' }), async 
 });
 
 // GET /api/v1/payments/history
-router.get('/history', authenticate, authorize('EMPLOYER'), async (req: AuthenticatedRequest, res: Response) => {
+router.get('/history', authenticate, authorize('EMPLOYER'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;

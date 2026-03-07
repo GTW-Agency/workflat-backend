@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../config/prisma';
-import { Role } from '@prisma/client';
+import { Role, UserStatus } from '@prisma/client';
 
 // Extend Express Request type
 declare global {
@@ -11,10 +11,10 @@ declare global {
         id: string;
         email: string;
         role: Role;
-        status: string;
-        applicantProfile: any;
-        employerProfile: any;
-        subscription: any[];
+        status: UserStatus;  // Changed from string to UserStatus
+        applicantProfile?: any;
+        employerProfile?: any;
+        subscription?: any[];
       };
     }
   }
