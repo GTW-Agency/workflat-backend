@@ -17,7 +17,10 @@ export const validateRegister = [
   body('role').isIn(['EMPLOYER', 'APPLICANT']).withMessage('Role must be EMPLOYER or APPLICANT'),
   handleValidationErrors,
 ];
-
+// Generic validate function that returns validation middleware
+export const validate = (validations: any[]) => {
+  return [...validations, handleValidationErrors];
+};
 export const validateLogin = [
   body('email').isEmail().normalizeEmail(),
   body('password').notEmpty().withMessage('Password is required'),

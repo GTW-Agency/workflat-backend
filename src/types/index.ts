@@ -9,6 +9,7 @@ export interface JwtPayload {
   exp?: number;
 }
 
+// Fixed: Made all user properties optional with ? to match auth middleware
 export interface AuthenticatedRequest extends Request {
   user?: {
     id: string;

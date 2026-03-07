@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import nodemailer from 'nodemailer';
 import { prisma } from '../config/prisma';
 import { NotificationType } from '@prisma/client';
-import { logger } from '../config/logger';
+import  logger  from '../config/logger';
 
 const EMAIL_TYPES: NotificationType[] = [
   'INTERVIEW_INVITE',

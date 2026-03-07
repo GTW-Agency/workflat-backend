@@ -23,14 +23,16 @@ router.get('/dashboard', async (req: Request, res: Response, next: NextFunction)
       include: { _count: { select: { applications: true } } },
     });
 
-    const totalViews = jobs.reduce((sum, j) => sum + j.view_count, 0);
-    const totalApplications = jobs.reduce((sum, j) => sum + j._count.applications, 0);
+    // Fixed: Add types to reduce parameters
+    const totalViews = jobs.reduce((sum: number, j: any) => sum + j.view_count, 0);
+    const totalApplications = jobs.reduce((sum: number, j: any) => sum + j._count.applications, 0);
 
     res.json({
-      activeJobs: jobs.filter((j) => j.status === 'ACTIVE').length,
+      activeJobs: jobs.filter((j: any) => j.status === 'ACTIVE').length,
       totalViews,
       totalApplications,
-      jobsPerformance: jobs.map((j) => ({
+      // Fixed: Add type to map parameter
+      jobsPerformance: jobs.map((j: any) => ({
         id: j.id,
         title: j.title,
         status: j.status,

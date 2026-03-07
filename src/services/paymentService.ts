@@ -2,7 +2,7 @@ import Stripe from 'stripe';
 import { prisma } from '../config/prisma';
 import { AppError } from '../middleware/errorHandler';
 import { notificationService } from './notificationService';
-import { logger } from '../config/logger';
+import logger from '../config/logger';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2023-10-16' });
 
@@ -66,7 +66,8 @@ export class PaymentService {
     const { employerId, planType } = session.metadata as { employerId: string; planType: 'STANDARD' | 'PREMIUM' };
     const limits = PLAN_LIMITS[planType];
 
-    await prisma.$transaction(async (tx) => {
+    // Fixed: Added type annotation for tx parameter
+    await prisma.$transaction(async (tx: any) => {
       // Deactivate old subscriptions
       await tx.subscription.updateMany({
         where: { employer_id: employerId, status: 'ACTIVE' },

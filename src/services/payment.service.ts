@@ -80,7 +80,8 @@ export class PaymentService {
     const { employerId, planType } = session.metadata as Record<string, string>;
     const limits = PLAN_LIMITS[planType as keyof typeof PLAN_LIMITS];
 
-    await prisma.$transaction(async (tx) => {
+    // Fixed: Added type annotation for tx parameter
+    await prisma.$transaction(async (tx: any) => {
       // Deactivate existing subscriptions
       await tx.subscription.updateMany({
         where: { employer_id: employerId, status: 'ACTIVE' },

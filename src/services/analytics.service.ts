@@ -39,6 +39,8 @@ export class AnalyticsService {
       by: ['status'],
       _count: { _all: true },
     });
+    // Fixed: Add type to map parameter
+    const formattedJobsByStatus = jobsByStatus.map((s: any) => ({ status: s.status, count: s._count._all }));
 
     const usersByRole = await prisma.user.groupBy({
       by: ['role'],
@@ -68,8 +70,10 @@ export class AnalyticsService {
         pendingJobApprovals: pendingJobs,
       },
       charts: {
-        jobsByStatus: jobsByStatus.map((s) => ({ status: s.status, count: s._count._all })),
-        usersByRole: usersByRole.map((r) => ({ role: r.role, count: r._count._all })),
+        // Fixed: Use formattedJobsByStatus instead of inline map
+        jobsByStatus: formattedJobsByStatus,
+        // Fixed: Add type to map parameter
+        usersByRole: usersByRole.map((r: any) => ({ role: r.role, count: r._count._all })),
       },
       recentSignups,
       popularJobs,
@@ -92,8 +96,9 @@ export class AnalyticsService {
       orderBy: { created_at: 'desc' },
     });
 
-    const totalViews = jobs.reduce((sum, job) => sum + job.view_count, 0);
-    const totalApplications = jobs.reduce((sum, job) => sum + job._count.applications, 0);
+    // Fixed: Add types to reduce parameters
+    const totalViews = jobs.reduce((sum: number, job: any) => sum + job.view_count, 0);
+    const totalApplications = jobs.reduce((sum: number, job: any) => sum + job._count.applications, 0);
 
     const recentApplications = await prisma.application.findMany({
       where: { job: { employer_id: user.employerProfile.id } },
@@ -109,8 +114,9 @@ export class AnalyticsService {
 
     return {
       overview: {
-        activeJobs: jobs.filter((j) => j.status === 'ACTIVE').length,
-        pendingJobs: jobs.filter((j) => j.status === 'PENDING_APPROVAL').length,
+        // Fixed: Add type to filter parameter
+        activeJobs: jobs.filter((j: any) => j.status === 'ACTIVE').length,
+        pendingJobs: jobs.filter((j: any) => j.status === 'PENDING_APPROVAL').length,
         totalJobs: jobs.length,
         totalViews,
         totalApplications,
@@ -125,7 +131,8 @@ export class AnalyticsService {
             expiresAt: subscription.end_date,
           }
         : null,
-      jobsPerformance: jobs.map((j) => ({
+      // Fixed: Add type to map parameter
+      jobsPerformance: jobs.map((j: any) => ({
         id: j.id,
         title: j.title,
         status: j.status,
@@ -168,10 +175,12 @@ export class AnalyticsService {
 
     return {
       overview: {
-        totalApplications: applicationStats.reduce((s, a) => s + a._count._all, 0),
+        // Fixed: Add types to reduce parameters
+        totalApplications: applicationStats.reduce((s: number, a: any) => s + a._count._all, 0),
         savedJobs: savedJobsCount,
         profileCompletion: user.applicantProfile.profile_completion,
-        applicationsByStatus: applicationStats.map((s) => ({
+        // Fixed: Add type to map parameter
+        applicationsByStatus: applicationStats.map((s: any) => ({
           status: s.status,
           count: s._count._all,
         })),
