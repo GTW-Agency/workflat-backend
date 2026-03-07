@@ -10,6 +10,11 @@ export const handleValidationErrors = (req: Request, res: Response, next: NextFu
   next();
 };
 
+// Generic validate function that matches what routes expect
+export const validate = (validations: any[]) => {
+  return [...validations, handleValidationErrors];
+};
+
 export const validateRegister = [
   body('email').isEmail().normalizeEmail().withMessage('Valid email required'),
   body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters')
@@ -17,10 +22,7 @@ export const validateRegister = [
   body('role').isIn(['EMPLOYER', 'APPLICANT']).withMessage('Role must be EMPLOYER or APPLICANT'),
   handleValidationErrors,
 ];
-// Generic validate function that returns validation middleware
-export const validate = (validations: any[]) => {
-  return [...validations, handleValidationErrors];
-};
+
 export const validateLogin = [
   body('email').isEmail().normalizeEmail(),
   body('password').notEmpty().withMessage('Password is required'),
