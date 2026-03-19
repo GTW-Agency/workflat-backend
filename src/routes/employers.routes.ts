@@ -191,5 +191,30 @@ router.post('/subscription/cancel', async (req: AuthenticatedRequest, res: Respo
     res.status(error.statusCode || 500).json({ success: false, error: error.message });
   }
 });
+// POST /api/v1/employers/profile/logo - Upload company logo
+router.post('/profile/logo', uploadImage.single('logo'), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.file) {
+      res.status(400).json({ success: false, error: 'No file uploaded' });
+      return;
+    }
+
+    const logoUrl = (req.file as any).secure_url || (req.file as any).path;
+
+    const profile = await prisma.employerProfile.upsert({
+      where: { user_id: req.user!.id },
+      update: { logo_url: logoUrl },
+      create: { 
+        user_id: req.user!.id, 
+        company_name: '', 
+        logo_url: logoUrl 
+      },
+    });
+
+    res.json({ success: true, data: { url: logoUrl } });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
 export default router;

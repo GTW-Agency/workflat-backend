@@ -550,5 +550,180 @@ router.delete('/content/:id', async (req: AuthenticatedRequest, res: Response) =
     res.status(500).json({ success: false, error: error.message });
   }
 });
+// DELETE /api/v1/admin/users/:id - Delete a user
+router.delete('/users/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.params.id;
+
+    // Check if user exists
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        applicantProfile: true,
+        employerProfile: true,
+      }
+    });
+
+    if (!user) {
+      res.status(404).json({ success: false, error: 'User not found' });
+      return;
+    }
+
+    // Don't allow deleting admin users? (Optional - based on your policy)
+    if (user.role === 'ADMIN') {
+      res.status(403).json({ success: false, error: 'Cannot delete admin users' });
+      return;
+    }
+
+    // Delete user (cascading deletes will handle related records)
+    await prisma.user.delete({
+      where: { id: userId }
+    });
+
+    logger.info(`User ${userId} (${user.email}) deleted by admin ${req.user!.email}`);
+
+    // Create notification for audit trail (optional)
+    await prisma.notification.create({
+      data: {
+        user_id: req.user!.id,
+        type: 'MESSAGE',
+        title: 'User Deleted',
+        message: `User ${user.email} (${user.role}) was deleted`,
+        data: {
+          deletedUserId: userId,
+          deletedUserEmail: user.email,
+          deletedUserRole: user.role
+        }
+      }
+    });
+
+    res.json({ 
+      success: true, 
+      message: 'User deleted successfully' 
+    });
+  } catch (error: any) {
+    logger.error('Error deleting user:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message || 'Failed to delete user' 
+    });
+  }
+});
+// POST /api/v1/admin/users/bulk-delete - Delete multiple users
+router.post('/users/bulk-delete', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { userIds } = req.body;
+
+    if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
+      res.status(400).json({ success: false, error: 'No user IDs provided' });
+      return;
+    }
+
+    // Don't allow deleting admin users
+    const adminUsers = await prisma.user.findMany({
+      where: {
+        id: { in: userIds },
+        role: 'ADMIN'
+      }
+    });
+
+    if (adminUsers.length > 0) {
+      res.status(403).json({ 
+        success: false, 
+        error: 'Cannot delete admin users',
+        adminEmails: adminUsers.map(u => u.email)
+      });
+      return;
+    }
+
+    // Delete users
+    const result = await prisma.user.deleteMany({
+      where: {
+        id: { in: userIds },
+        role: { not: 'ADMIN' } // Extra safety
+      }
+    });
+
+    logger.info(`${result.count} users deleted by admin ${req.user!.email}`);
+
+    res.json({ 
+      success: true, 
+      message: `${result.count} users deleted successfully`,
+      count: result.count
+    });
+  } catch (error: any) {
+    logger.error('Error bulk deleting users:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message || 'Failed to delete users' 
+    });
+  }
+});
+// GET /api/v1/admin/employers
+router.get('/employers', validatePagination, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 20;
+
+    const [employers, total] = await Promise.all([
+      prisma.employerProfile.findMany({
+        include: {
+          user: { select: { id: true, email: true, status: true, created_at: true } },
+          _count: { select: { jobs: true } },
+        },
+        orderBy: { created_at: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      prisma.employerProfile.count(),
+    ]);
+
+    res.json({
+      success: true,
+      data: employers,
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// PUT /api/v1/admin/employers/:id/verify
+router.put('/employers/:id/verify', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { status } = req.body;
+    if (!['VERIFIED', 'REJECTED'].includes(status)) {
+      res.status(400).json({ success: false, error: 'Invalid status' });
+      return;
+    }
+    const employer = await prisma.employerProfile.update({
+      where: { id: req.params.id },
+      data: { verification_status: status },
+    });
+    
+    // Notify the employer
+    const profile = await prisma.employerProfile.findUnique({
+      where: { id: req.params.id },
+      include: { user: true }
+    });
+    
+    if (profile?.user) {
+      await prisma.notification.create({
+        data: {
+          user_id: profile.user.id,
+          type: 'JOB_STATUS_UPDATE',
+          title: status === 'VERIFIED' ? 'Company Verified' : 'Verification Rejected',
+          message: status === 'VERIFIED' 
+            ? 'Your company has been verified. You can now post jobs.'
+            : 'Your company verification was rejected. Please contact support.',
+        }
+      });
+    }
+    
+    res.json({ success: true, data: employer });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
 export default router;

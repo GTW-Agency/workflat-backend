@@ -156,13 +156,16 @@ model User {
   updated_at     DateTime   @updatedAt
   last_login     DateTime?
 
+  // One-to-one relations
   applicantProfile ApplicantProfile?
   employerProfile  EmployerProfile?
+  
+  // One-to-many relations - REMOVE the @relation attribute completely
   subscription     Subscription[]
-  notifications    Notification[]
+  notifications    Notification[]    // Just the array, no @relation needed
   content          Content[]
   transactions     Transaction[]
-  refresh_tokens   RefreshToken[]
+  refresh_tokens   RefreshToken[]    // Just the array, no @relation needed
 
   @@map("users")
 }
