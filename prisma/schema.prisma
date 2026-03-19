@@ -267,6 +267,7 @@ model Job {
   salary_max         Int?
   salary_currency    String         @default("USD")
   salary_period      SalaryPeriod   @default(YEARLY)
+  custom_company_name String?        // Add this new field
 
   industry           String?
   category           String?

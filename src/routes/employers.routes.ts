@@ -114,10 +114,27 @@ router.delete('/jobs/:id', async (req: AuthenticatedRequest, res: Response) => {
 // GET /api/v1/employers/jobs/:id/applications
 router.get('/jobs/:id/applications', validatePagination, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const result = await applicationService.getJobApplications(req.params.id, req.user!.id, req.query);
-    res.json({ success: true, ...result });
+    console.log('Fetching applications for job:', req.params.id, 'User:', req.user?.id);
+    
+    const result = await applicationService.getJobApplications(
+      req.params.id, 
+      req.user!.id, 
+      req.query
+    );
+    
+    console.log('Found applications:', result.applications.length);
+    
+    res.json({ 
+      success: true, 
+      applications: result.applications,
+      pagination: result.pagination 
+    });
   } catch (error: any) {
-    res.status(error.statusCode || 500).json({ success: false, error: error.message });
+    console.error('Error fetching applications:', error);
+    res.status(error.statusCode || 500).json({ 
+      success: false, 
+      error: error.message 
+    });
   }
 });
 

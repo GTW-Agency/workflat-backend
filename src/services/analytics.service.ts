@@ -29,7 +29,26 @@ export class AnalyticsService {
       prisma.job.count({ where: { status: 'PENDING_APPROVAL' } }),
       prisma.user.findMany({
         where: { created_at: { gte: sevenDaysAgo } },
-        select: { id: true, email: true, role: true, created_at: true, status: true },
+        select: { 
+          id: true, 
+          email: true, 
+          role: true, 
+          created_at: true, 
+          status: true,
+          applicantProfile: {
+            select: {
+              first_name: true,
+              last_name: true,
+              avatar_url: true
+            }
+          },
+          employerProfile: {
+            select: {
+              company_name: true,
+              logo_url: true
+            }
+          }
+        },
         orderBy: { created_at: 'desc' },
         take: 10,
       }),
@@ -39,8 +58,11 @@ export class AnalyticsService {
       by: ['status'],
       _count: { _all: true },
     });
-    // Fixed: Add type to map parameter
-    const formattedJobsByStatus = jobsByStatus.map((s: any) => ({ status: s.status, count: s._count._all }));
+    
+    const formattedJobsByStatus = jobsByStatus.map((s: any) => ({ 
+      status: s.status, 
+      _count: s._count._all 
+    }));
 
     const usersByRole = await prisma.user.groupBy({
       by: ['role'],
@@ -61,29 +83,109 @@ export class AnalyticsService {
     });
 
     return {
-      overview: {
-        totalUsers,
-        totalJobs,
-        totalApplications,
-        activeSubscriptions,
-        revenueThisMonth: revenueResult._sum.amount || 0,
-        pendingJobApprovals: pendingJobs,
+      stats: {
+        total_users: totalUsers,
+        total_jobs: totalJobs,
+        total_applications: totalApplications,
+        active_subscriptions: activeSubscriptions,
+        monthly_revenue: revenueResult._sum.amount || 0,
+        pending_jobs: pendingJobs,
       },
-      charts: {
-        // Fixed: Use formattedJobsByStatus instead of inline map
-        jobsByStatus: formattedJobsByStatus,
-        // Fixed: Add type to map parameter
-        usersByRole: usersByRole.map((r: any) => ({ role: r.role, count: r._count._all })),
-      },
+      usersByRole: usersByRole.map((r: any) => ({ 
+        role: r.role, 
+        _count: r._count._all 
+      })),
+      jobsByStatus: formattedJobsByStatus,
       recentSignups,
       popularJobs,
+    };
+  }
+
+  async getAdminUsers(filters: any = {}) {
+    const { role, status, search, page = 1, limit = 20 } = filters;
+    const where: any = {};
+    if (role) where.role = role;
+    if (status) where.status = status;
+    if (search) {
+      where.OR = [
+        { email: { contains: search, mode: 'insensitive' } },
+        { applicantProfile: { first_name: { contains: search, mode: 'insensitive' } } },
+        { applicantProfile: { last_name: { contains: search, mode: 'insensitive' } } },
+        { employerProfile: { company_name: { contains: search, mode: 'insensitive' } } },
+      ];
+    }
+
+    const pageNum = parseInt(page as string);
+    const limitNum = parseInt(limit as string);
+
+    const [users, total] = await Promise.all([
+      prisma.user.findMany({
+        where,
+        select: {
+          id: true,
+          email: true,
+          role: true,
+          status: true,
+          email_verified: true,
+          created_at: true,
+          last_login: true,
+          applicantProfile: { 
+            select: { 
+              first_name: true, 
+              last_name: true,
+              phone: true,
+              location: true,
+              title: true,
+              bio: true,
+              skills: true,
+              years_experience: true,
+              education: true,
+              resume_url: true,
+              linkedin_url: true,
+              portfolio_url: true,
+              avatar_url: true,
+              nationality: true,
+              experience_level: true,
+              desired_salary: true,
+              preferred_locations: true,
+              visa_status: true,
+              relocation_ready: true,
+              profile_completion: true,
+            } 
+          },
+          employerProfile: { 
+            select: { 
+              company_name: true, 
+              industry: true,
+              location: true,
+              website: true,
+              verification_status: true,
+              logo_url: true,
+            } 
+          },
+        },
+        orderBy: { created_at: 'desc' },
+        ...paginate(pageNum, limitNum),
+      }),
+      prisma.user.count({ where }),
+    ]);
+
+    return { 
+      users, 
+      pagination: formatPagination(pageNum, limitNum, total) 
     };
   }
 
   async getEmployerDashboard(employerUserId: string) {
     const user = await prisma.user.findUnique({
       where: { id: employerUserId },
-      include: { employerProfile: true, subscription: { where: { status: 'ACTIVE' }, take: 1 } },
+      include: { 
+        employerProfile: true, 
+        subscription: { 
+          where: { status: 'ACTIVE' }, 
+          take: 1 
+        } 
+      },
     });
 
     if (!user?.employerProfile) {
@@ -96,15 +198,21 @@ export class AnalyticsService {
       orderBy: { created_at: 'desc' },
     });
 
-    // Fixed: Add types to reduce parameters
-    const totalViews = jobs.reduce((sum: number, job: any) => sum + job.view_count, 0);
+    const totalViews = jobs.reduce((sum: number, job: any) => sum + (job.view_count || 0), 0);
     const totalApplications = jobs.reduce((sum: number, job: any) => sum + job._count.applications, 0);
 
     const recentApplications = await prisma.application.findMany({
       where: { job: { employer_id: user.employerProfile.id } },
       include: {
         job: { select: { title: true } },
-        applicant: { select: { first_name: true, last_name: true, avatar_url: true } },
+        applicant: { 
+          select: { 
+            first_name: true, 
+            last_name: true, 
+            avatar_url: true,
+            title: true
+          } 
+        },
       },
       orderBy: { applied_at: 'desc' },
       take: 5,
@@ -113,17 +221,18 @@ export class AnalyticsService {
     const subscription = user.subscription[0];
 
     return {
-      overview: {
-        // Fixed: Add type to filter parameter
-        activeJobs: jobs.filter((j: any) => j.status === 'ACTIVE').length,
-        pendingJobs: jobs.filter((j: any) => j.status === 'PENDING_APPROVAL').length,
-        totalJobs: jobs.length,
-        totalViews,
-        totalApplications,
+      stats: {
+        active_jobs: jobs.filter((j: any) => j.status === 'ACTIVE').length,
+        pending_jobs: jobs.filter((j: any) => j.status === 'PENDING_APPROVAL').length,
+        total_jobs: jobs.length,
+        total_views: totalViews,
+        total_applications: totalApplications,
+        pending_applications: 0, // You can calculate this if needed
       },
       subscription: subscription
         ? {
             plan: subscription.plan_type,
+            status: subscription.status,
             jobsUsed: subscription.jobs_used,
             jobsLimit: subscription.jobs_limit,
             featuredUsed: subscription.featured_jobs_used,
@@ -131,12 +240,17 @@ export class AnalyticsService {
             expiresAt: subscription.end_date,
           }
         : null,
-      // Fixed: Add type to map parameter
+      usageLimits: subscription
+        ? {
+            jobsUsed: subscription.jobs_used,
+            jobsLimit: subscription.jobs_limit,
+          }
+        : { jobsUsed: 0, jobsLimit: 1 },
       jobsPerformance: jobs.map((j: any) => ({
         id: j.id,
         title: j.title,
         status: j.status,
-        views: j.view_count,
+        views: j.view_count || 0,
         applications: j._count.applications,
         createdAt: j.created_at,
       })),
@@ -173,55 +287,24 @@ export class AnalyticsService {
       }),
     ]);
 
+    const totalApplications = applicationStats.reduce((s: number, a: any) => s + a._count._all, 0);
+    const pendingApplications = applicationStats
+      .filter((a: any) => ['PENDING', 'REVIEWING'].includes(a.status))
+      .reduce((s: number, a: any) => s + a._count._all, 0);
+    const interviews = applicationStats
+      .filter((a: any) => a.status === 'INTERVIEW')
+      .reduce((s: number, a: any) => s + a._count._all, 0);
+
     return {
-      overview: {
-        // Fixed: Add types to reduce parameters
-        totalApplications: applicationStats.reduce((s: number, a: any) => s + a._count._all, 0),
-        savedJobs: savedJobsCount,
-        profileCompletion: user.applicantProfile.profile_completion,
-        // Fixed: Add type to map parameter
-        applicationsByStatus: applicationStats.map((s: any) => ({
-          status: s.status,
-          count: s._count._all,
-        })),
+      stats: {
+        total_applications: totalApplications,
+        pending_applications: pendingApplications,
+        saved_jobs: savedJobsCount,
+        interviews: interviews,
       },
+      profileCompletion: user.applicantProfile.profile_completion || 0,
       recentApplications,
     };
-  }
-
-  async getAdminUsers(filters: any = {}) {
-    const { role, status, search, page = 1, limit = 20 } = filters;
-    const where: any = {};
-    if (role) where.role = role;
-    if (status) where.status = status;
-    if (search) {
-      where.email = { contains: search, mode: 'insensitive' };
-    }
-
-    const pageNum = parseInt(page);
-    const limitNum = parseInt(limit);
-
-    const [users, total] = await Promise.all([
-      prisma.user.findMany({
-        where,
-        select: {
-          id: true,
-          email: true,
-          role: true,
-          status: true,
-          email_verified: true,
-          created_at: true,
-          last_login: true,
-          applicantProfile: { select: { first_name: true, last_name: true } },
-          employerProfile: { select: { company_name: true, verification_status: true } },
-        },
-        orderBy: { created_at: 'desc' },
-        ...paginate(pageNum, limitNum),
-      }),
-      prisma.user.count({ where }),
-    ]);
-
-    return { users, pagination: formatPagination(pageNum, limitNum, total) };
   }
 }
 
