@@ -103,6 +103,7 @@ enum InterviewType {
   ONSITE
 }
 
+
 enum NotificationType {
   JOB_ALERT
   APPLICATION_UPDATE
@@ -111,6 +112,7 @@ enum NotificationType {
   SUBSCRIPTION_ACTIVATED
   JOB_STATUS_UPDATE
   MESSAGE
+  SYSTEM  // Add this line
 }
 
 enum ContentType {
@@ -383,3 +385,4 @@ model Transaction {
 
   @@map("transactions")
 }
+

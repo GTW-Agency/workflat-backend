@@ -8,6 +8,7 @@ import analyticsService from '../services/analytics.service';
 import { AuthenticatedRequest } from '../types';
 import { slugify } from '../utils/helpers';
 import logger from '../config/logger';
+import bcrypt from 'bcryptjs';
 
 const router = Router();
 
@@ -321,4 +322,210 @@ router.delete('/content/:id', async (req: AuthenticatedRequest, res: Response) =
   }
 });
 
+// Add these imports at the top
+
+// Add these new routes after the existing user routes
+
+// GET /api/v1/admin/admins - List all admin users
+router.get('/admins', validatePagination, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 20;
+
+    const [admins, total] = await Promise.all([
+      prisma.user.findMany({
+        where: { role: 'ADMIN' },
+        select: {
+          id: true,
+          email: true,
+          role: true,
+          status: true,
+          created_at: true,
+          last_login: true,
+          email_verified: true,
+        },
+        orderBy: { created_at: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      prisma.user.count({ where: { role: 'ADMIN' } }),
+    ]);
+
+    res.json({
+      success: true,
+      data: admins,
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/v1/admin/admins - Create a new admin user
+router.post('/admins', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { email, password, name } = req.body;
+
+    // Validate input
+    if (!email || !password) {
+      res.status(400).json({ success: false, error: 'Email and password are required' });
+      return;
+    }
+
+    if (password.length < 8) {
+      res.status(400).json({ success: false, error: 'Password must be at least 8 characters' });
+      return;
+    }
+
+    // Check if email already exists
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) {
+      res.status(409).json({ success: false, error: 'Email already in use' });
+      return;
+    }
+
+    // Hash password
+    const password_hash = await bcrypt.hash(password, 12);
+
+    // Create admin user
+    const admin = await prisma.user.create({
+      data: {
+        email,
+        password_hash,
+        role: 'ADMIN',
+        status: 'ACTIVE',
+        email_verified: true, // Auto-verify admin accounts
+      },
+      select: {
+        id: true,
+        email: true,
+        role: true,
+        status: true,
+        created_at: true,
+      },
+    });
+
+    logger.info(`New admin created by ${req.user!.email}: ${email}`);
+
+    // Create notification for the new admin
+    await prisma.notification.create({
+      data: {
+        user_id: admin.id,
+        type: 'SYSTEM',
+        title: 'Welcome to Admin Team',
+        message: 'You have been granted admin access to the platform.',
+      },
+    });
+
+    res.status(201).json({ success: true, data: admin });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// PUT /api/v1/admin/admins/:id - Update admin (email, password, status)
+router.put('/admins/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { email, password, status } = req.body;
+    const adminId = req.params.id;
+
+    // Don't allow editing yourself? Or allow it? Your choice
+    if (adminId === req.user!.id) {
+      res.status(400).json({ success: false, error: 'Use your profile settings to update your own account' });
+      return;
+    }
+
+    // Check if admin exists
+    const existing = await prisma.user.findFirst({
+      where: { id: adminId, role: 'ADMIN' },
+    });
+
+    if (!existing) {
+      res.status(404).json({ success: false, error: 'Admin not found' });
+      return;
+    }
+
+    const updateData: any = {};
+
+    if (email) {
+      // Check if email is taken
+      const emailExists = await prisma.user.findFirst({
+        where: { email, NOT: { id: adminId } },
+      });
+      if (emailExists) {
+        res.status(409).json({ success: false, error: 'Email already in use' });
+        return;
+      }
+      updateData.email = email;
+    }
+
+    if (password) {
+      if (password.length < 8) {
+        res.status(400).json({ success: false, error: 'Password must be at least 8 characters' });
+        return;
+      }
+      updateData.password_hash = await bcrypt.hash(password, 12);
+    }
+
+    if (status) {
+      if (!['ACTIVE', 'SUSPENDED'].includes(status)) {
+        res.status(400).json({ success: false, error: 'Invalid status' });
+        return;
+      }
+      updateData.status = status;
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: adminId },
+      data: updateData,
+      select: {
+        id: true,
+        email: true,
+        role: true,
+        status: true,
+        created_at: true,
+      },
+    });
+
+    logger.info(`Admin ${adminId} updated by ${req.user!.email}`);
+
+    res.json({ success: true, data: updated });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// DELETE /api/v1/admin/admins/:id - Remove admin
+router.delete('/admins/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const adminId = req.params.id;
+
+    // Prevent deleting yourself
+    if (adminId === req.user!.id) {
+      res.status(400).json({ success: false, error: 'You cannot delete your own admin account' });
+      return;
+    }
+
+    // Check if admin exists
+    const existing = await prisma.user.findFirst({
+      where: { id: adminId, role: 'ADMIN' },
+    });
+
+    if (!existing) {
+      res.status(404).json({ success: false, error: 'Admin not found' });
+      return;
+    }
+
+    // Delete the admin user
+    await prisma.user.delete({
+      where: { id: adminId },
+    });
+
+    logger.info(`Admin ${adminId} deleted by ${req.user!.email}`);
+
+    res.json({ success: true, message: 'Admin deleted successfully' });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 export default router;
