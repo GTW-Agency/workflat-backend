@@ -1,5 +1,6 @@
 import { Router, Response } from 'express';
 import prisma from '../config/database';
+import bcrypt from 'bcryptjs';
 import { authenticate } from '../middleware/authenticate';
 import { authorize } from '../middleware/authorize';
 import { validateJobPost, validatePagination, validateContent } from '../middleware/validate';
@@ -8,7 +9,6 @@ import analyticsService from '../services/analytics.service';
 import { AuthenticatedRequest } from '../types';
 import { slugify } from '../utils/helpers';
 import logger from '../config/logger';
-import bcrypt from 'bcryptjs';
 
 const router = Router();
 
@@ -144,187 +144,7 @@ router.put('/users/:id/status', async (req: AuthenticatedRequest, res: Response)
   }
 });
 
-// GET /api/v1/admin/jobs
-router.get('/jobs', validatePagination, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const result = await jobService.getAdminJobs(req.query);
-    res.json({ success: true, ...result });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// POST /api/v1/admin/jobs
-router.post('/jobs', validateJobPost, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const job = await jobService.createJob(req.user!.id, req.body, true);
-    res.status(201).json({ success: true, data: job });
-  } catch (error: any) {
-    res.status(error.statusCode || 500).json({ success: false, error: error.message });
-  }
-});
-
-// PUT /api/v1/admin/jobs/:id/approve
-router.put('/jobs/:id/approve', async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const job = await jobService.approveJob(req.user!.id, req.params.id, true);
-    res.json({ success: true, message: 'Job approved', data: job });
-  } catch (error: any) {
-    res.status(error.statusCode || 500).json({ success: false, error: error.message });
-  }
-});
-
-// PUT /api/v1/admin/jobs/:id/reject
-router.put('/jobs/:id/reject', async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const { reason } = req.body;
-    if (!reason) { 
-      res.status(400).json({ success: false, error: 'Rejection reason required' }); 
-      return; 
-    }
-    const job = await jobService.rejectJob(req.user!.id, req.params.id, reason);
-    res.json({ success: true, message: 'Job rejected', data: job });
-  } catch (error: any) {
-    res.status(error.statusCode || 500).json({ success: false, error: error.message });
-  }
-});
-
-// DELETE /api/v1/admin/jobs/:id
-router.delete('/jobs/:id', async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    await prisma.job.delete({ where: { id: req.params.id } });
-    res.json({ success: true, message: 'Job deleted' });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// GET /api/v1/admin/employers
-router.get('/employers', validatePagination, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 20;
-
-    const [employers, total] = await Promise.all([
-      prisma.employerProfile.findMany({
-        include: {
-          user: { select: { id: true, email: true, status: true, created_at: true } },
-          _count: { select: { jobs: true } },
-        },
-        orderBy: { created_at: 'desc' },
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      prisma.employerProfile.count(),
-    ]);
-
-    res.json({
-      success: true,
-      data: employers,
-      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
-    });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// PUT /api/v1/admin/employers/:id/verify
-router.put('/employers/:id/verify', async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const { status } = req.body;
-    if (!['VERIFIED', 'REJECTED'].includes(status)) {
-      res.status(400).json({ success: false, error: 'Invalid status' });
-      return;
-    }
-    const employer = await prisma.employerProfile.update({
-      where: { id: req.params.id },
-      data: { verification_status: status },
-    });
-    res.json({ success: true, data: employer });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// GET /api/v1/admin/content
-router.get('/content', validatePagination, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const { type, status, page = 1, limit = 20 } = req.query;
-    const where: any = {};
-    if (type) where.type = type;
-    if (status) where.status = status;
-
-    const pageNum = parseInt(page as string);
-    const limitNum = parseInt(limit as string);
-
-    const [content, total] = await Promise.all([
-      prisma.content.findMany({
-        where,
-        include: { author: { select: { email: true } } },
-        orderBy: { created_at: 'desc' },
-        skip: (pageNum - 1) * limitNum,
-        take: limitNum,
-      }),
-      prisma.content.count({ where }),
-    ]);
-
-    res.json({
-      success: true,
-      data: content,
-      pagination: { page: pageNum, limit: limitNum, total, totalPages: Math.ceil(total / limitNum) },
-    });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// POST /api/v1/admin/content
-router.post('/content', validateContent, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const data = {
-      ...req.body,
-      author_id: req.user!.id,
-      slug: req.body.slug || slugify(req.body.title),
-      published_at: req.body.status === 'PUBLISHED' ? new Date() : null,
-    };
-    const content = await prisma.content.create({ data });
-    res.status(201).json({ success: true, data: content });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// PUT /api/v1/admin/content/:id
-router.put('/content/:id', async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const updateData = { ...req.body };
-    if (updateData.status === 'PUBLISHED') {
-      const existing = await prisma.content.findUnique({ where: { id: req.params.id } });
-      if (!existing?.published_at) updateData.published_at = new Date();
-    }
-    const content = await prisma.content.update({
-      where: { id: req.params.id },
-      data: updateData,
-    });
-    res.json({ success: true, data: content });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// DELETE /api/v1/admin/content/:id
-router.delete('/content/:id', async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    await prisma.content.delete({ where: { id: req.params.id } });
-    res.json({ success: true, message: 'Content deleted' });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// Add these imports at the top
-
-// Add these new routes after the existing user routes
+// ============ ADMIN MANAGEMENT ROUTES ============
 
 // GET /api/v1/admin/admins - List all admin users
 router.get('/admins', validatePagination, async (req: AuthenticatedRequest, res: Response) => {
@@ -364,7 +184,7 @@ router.get('/admins', validatePagination, async (req: AuthenticatedRequest, res:
 // POST /api/v1/admin/admins - Create a new admin user
 router.post('/admins', async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { email, password, name } = req.body;
+    const { email, password } = req.body;
 
     // Validate input
     if (!email || !password) {
@@ -411,9 +231,27 @@ router.post('/admins', async (req: AuthenticatedRequest, res: Response) => {
     await prisma.notification.create({
       data: {
         user_id: admin.id,
-        type: 'SYSTEM',
+        type: 'MESSAGE',
         title: 'Welcome to Admin Team',
         message: 'You have been granted admin access to the platform.',
+        data: {
+          createdBy: req.user!.email,
+          createdAt: new Date().toISOString()
+        }
+      },
+    });
+
+    // Also notify the creator
+    await prisma.notification.create({
+      data: {
+        user_id: req.user!.id,
+        type: 'MESSAGE',
+        title: 'Admin Created',
+        message: `Successfully created admin account for ${email}`,
+        data: {
+          newAdminId: admin.id,
+          newAdminEmail: admin.email
+        }
       },
     });
 
@@ -429,7 +267,7 @@ router.put('/admins/:id', async (req: AuthenticatedRequest, res: Response) => {
     const { email, password, status } = req.body;
     const adminId = req.params.id;
 
-    // Don't allow editing yourself? Or allow it? Your choice
+    // Don't allow editing yourself
     if (adminId === req.user!.id) {
       res.status(400).json({ success: false, error: 'Use your profile settings to update your own account' });
       return;
@@ -528,4 +366,189 @@ router.delete('/admins/:id', async (req: AuthenticatedRequest, res: Response) =>
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+// ============ JOB MANAGEMENT ROUTES ============
+
+// GET /api/v1/admin/jobs
+router.get('/jobs', validatePagination, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await jobService.getAdminJobs(req.query);
+    res.json({ success: true, ...result });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/v1/admin/jobs
+router.post('/jobs', validateJobPost, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const job = await jobService.createJob(req.user!.id, req.body, true);
+    res.status(201).json({ success: true, data: job });
+  } catch (error: any) {
+    res.status(error.statusCode || 500).json({ success: false, error: error.message });
+  }
+});
+
+// PUT /api/v1/admin/jobs/:id/approve
+router.put('/jobs/:id/approve', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const job = await jobService.approveJob(req.user!.id, req.params.id, true);
+    res.json({ success: true, message: 'Job approved', data: job });
+  } catch (error: any) {
+    res.status(error.statusCode || 500).json({ success: false, error: error.message });
+  }
+});
+
+// PUT /api/v1/admin/jobs/:id/reject
+router.put('/jobs/:id/reject', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { reason } = req.body;
+    if (!reason) { 
+      res.status(400).json({ success: false, error: 'Rejection reason required' }); 
+      return; 
+    }
+    const job = await jobService.rejectJob(req.user!.id, req.params.id, reason);
+    res.json({ success: true, message: 'Job rejected', data: job });
+  } catch (error: any) {
+    res.status(error.statusCode || 500).json({ success: false, error: error.message });
+  }
+});
+
+// DELETE /api/v1/admin/jobs/:id
+router.delete('/jobs/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    await prisma.job.delete({ where: { id: req.params.id } });
+    res.json({ success: true, message: 'Job deleted' });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ============ EMPLOYER MANAGEMENT ROUTES ============
+
+// GET /api/v1/admin/employers
+router.get('/employers', validatePagination, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 20;
+
+    const [employers, total] = await Promise.all([
+      prisma.employerProfile.findMany({
+        include: {
+          user: { select: { id: true, email: true, status: true, created_at: true } },
+          _count: { select: { jobs: true } },
+        },
+        orderBy: { created_at: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      prisma.employerProfile.count(),
+    ]);
+
+    res.json({
+      success: true,
+      data: employers,
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// PUT /api/v1/admin/employers/:id/verify
+router.put('/employers/:id/verify', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { status } = req.body;
+    if (!['VERIFIED', 'REJECTED'].includes(status)) {
+      res.status(400).json({ success: false, error: 'Invalid status' });
+      return;
+    }
+    const employer = await prisma.employerProfile.update({
+      where: { id: req.params.id },
+      data: { verification_status: status },
+    });
+    res.json({ success: true, data: employer });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ============ CONTENT MANAGEMENT ROUTES ============
+
+// GET /api/v1/admin/content
+router.get('/content', validatePagination, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { type, status, page = 1, limit = 20 } = req.query;
+    const where: any = {};
+    if (type) where.type = type;
+    if (status) where.status = status;
+
+    const pageNum = parseInt(page as string);
+    const limitNum = parseInt(limit as string);
+
+    const [content, total] = await Promise.all([
+      prisma.content.findMany({
+        where,
+        include: { author: { select: { email: true } } },
+        orderBy: { created_at: 'desc' },
+        skip: (pageNum - 1) * limitNum,
+        take: limitNum,
+      }),
+      prisma.content.count({ where }),
+    ]);
+
+    res.json({
+      success: true,
+      data: content,
+      pagination: { page: pageNum, limit: limitNum, total, totalPages: Math.ceil(total / limitNum) },
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/v1/admin/content
+router.post('/content', validateContent, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const data = {
+      ...req.body,
+      author_id: req.user!.id,
+      slug: req.body.slug || slugify(req.body.title),
+      published_at: req.body.status === 'PUBLISHED' ? new Date() : null,
+    };
+    const content = await prisma.content.create({ data });
+    res.status(201).json({ success: true, data: content });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// PUT /api/v1/admin/content/:id
+router.put('/content/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const updateData = { ...req.body };
+    if (updateData.status === 'PUBLISHED') {
+      const existing = await prisma.content.findUnique({ where: { id: req.params.id } });
+      if (!existing?.published_at) updateData.published_at = new Date();
+    }
+    const content = await prisma.content.update({
+      where: { id: req.params.id },
+      data: updateData,
+    });
+    res.json({ success: true, data: content });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// DELETE /api/v1/admin/content/:id
+router.delete('/content/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    await prisma.content.delete({ where: { id: req.params.id } });
+    res.json({ success: true, message: 'Content deleted' });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 export default router;

@@ -1,5 +1,6 @@
 import { Router, Response } from 'express';
 import prisma from '../config/database';
+import bcrypt from 'bcryptjs';
 import { authenticate } from '../middleware/authenticate';
 import { authorize } from '../middleware/authorize';
 import { validateJobPost, validatePagination, validateContent } from '../middleware/validate';
@@ -41,12 +42,83 @@ router.get('/users/:id', async (req: AuthenticatedRequest, res: Response) => {
       include: {
         applicantProfile: true,
         employerProfile: true,
-        subscription: true,
+        subscription: { orderBy: { created_at: 'desc' }, take: 1 },
         transactions: { orderBy: { created_at: 'desc' }, take: 10 },
       },
     });
-    if (!user) { res.status(404).json({ success: false, error: 'User not found' }); return; }
+    if (!user) { 
+      res.status(404).json({ success: false, error: 'User not found' }); 
+      return; 
+    }
     res.json({ success: true, data: user });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /api/v1/admin/users/:id/applicant-profile - Get detailed applicant profile
+router.get('/users/:id/applicant-profile', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.params.id },
+      include: {
+        applicantProfile: {
+          include: {
+            applications: {
+              include: {
+                job: {
+                  select: {
+                    id: true,
+                    title: true,
+                    employer: {
+                      select: {
+                        company_name: true
+                      }
+                    }
+                  }
+                }
+              },
+              orderBy: { applied_at: 'desc' },
+              take: 10
+            },
+            saved_jobs: {
+              include: {
+                job: {
+                  select: {
+                    id: true,
+                    title: true,
+                    employer: {
+                      select: {
+                        company_name: true
+                      }
+                    }
+                  }
+                }
+              },
+              take: 10
+            }
+          }
+        }
+      }
+    });
+
+    if (!user) {
+      res.status(404).json({ success: false, error: 'User not found' });
+      return;
+    }
+
+    if (!user.applicantProfile) {
+      res.status(404).json({ success: false, error: 'Applicant profile not found' });
+      return;
+    }
+
+    res.json({ 
+      success: true, 
+      data: {
+        ...user,
+        applicantProfile: user.applicantProfile
+      }
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -71,6 +143,231 @@ router.put('/users/:id/status', async (req: AuthenticatedRequest, res: Response)
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+// ============ ADMIN MANAGEMENT ROUTES ============
+
+// GET /api/v1/admin/admins - List all admin users
+router.get('/admins', validatePagination, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 20;
+
+    const [admins, total] = await Promise.all([
+      prisma.user.findMany({
+        where: { role: 'ADMIN' },
+        select: {
+          id: true,
+          email: true,
+          role: true,
+          status: true,
+          created_at: true,
+          last_login: true,
+          email_verified: true,
+        },
+        orderBy: { created_at: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      prisma.user.count({ where: { role: 'ADMIN' } }),
+    ]);
+
+    res.json({
+      success: true,
+      data: admins,
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/v1/admin/admins - Create a new admin user
+router.post('/admins', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { email, password } = req.body;
+
+    // Validate input
+    if (!email || !password) {
+      res.status(400).json({ success: false, error: 'Email and password are required' });
+      return;
+    }
+
+    if (password.length < 8) {
+      res.status(400).json({ success: false, error: 'Password must be at least 8 characters' });
+      return;
+    }
+
+    // Check if email already exists
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) {
+      res.status(409).json({ success: false, error: 'Email already in use' });
+      return;
+    }
+
+    // Hash password
+    const password_hash = await bcrypt.hash(password, 12);
+
+    // Create admin user
+    const admin = await prisma.user.create({
+      data: {
+        email,
+        password_hash,
+        role: 'ADMIN',
+        status: 'ACTIVE',
+        email_verified: true, // Auto-verify admin accounts
+      },
+      select: {
+        id: true,
+        email: true,
+        role: true,
+        status: true,
+        created_at: true,
+      },
+    });
+
+    logger.info(`New admin created by ${req.user!.email}: ${email}`);
+
+    // Create notification for the new admin
+    await prisma.notification.create({
+      data: {
+        user_id: admin.id,
+        type: 'MESSAGE',
+        title: 'Welcome to Admin Team',
+        message: 'You have been granted admin access to the platform.',
+        data: {
+          createdBy: req.user!.email,
+          createdAt: new Date().toISOString()
+        }
+      },
+    });
+
+    // Also notify the creator
+    await prisma.notification.create({
+      data: {
+        user_id: req.user!.id,
+        type: 'MESSAGE',
+        title: 'Admin Created',
+        message: `Successfully created admin account for ${email}`,
+        data: {
+          newAdminId: admin.id,
+          newAdminEmail: admin.email
+        }
+      },
+    });
+
+    res.status(201).json({ success: true, data: admin });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// PUT /api/v1/admin/admins/:id - Update admin (email, password, status)
+router.put('/admins/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { email, password, status } = req.body;
+    const adminId = req.params.id;
+
+    // Don't allow editing yourself
+    if (adminId === req.user!.id) {
+      res.status(400).json({ success: false, error: 'Use your profile settings to update your own account' });
+      return;
+    }
+
+    // Check if admin exists
+    const existing = await prisma.user.findFirst({
+      where: { id: adminId, role: 'ADMIN' },
+    });
+
+    if (!existing) {
+      res.status(404).json({ success: false, error: 'Admin not found' });
+      return;
+    }
+
+    const updateData: any = {};
+
+    if (email) {
+      // Check if email is taken
+      const emailExists = await prisma.user.findFirst({
+        where: { email, NOT: { id: adminId } },
+      });
+      if (emailExists) {
+        res.status(409).json({ success: false, error: 'Email already in use' });
+        return;
+      }
+      updateData.email = email;
+    }
+
+    if (password) {
+      if (password.length < 8) {
+        res.status(400).json({ success: false, error: 'Password must be at least 8 characters' });
+        return;
+      }
+      updateData.password_hash = await bcrypt.hash(password, 12);
+    }
+
+    if (status) {
+      if (!['ACTIVE', 'SUSPENDED'].includes(status)) {
+        res.status(400).json({ success: false, error: 'Invalid status' });
+        return;
+      }
+      updateData.status = status;
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: adminId },
+      data: updateData,
+      select: {
+        id: true,
+        email: true,
+        role: true,
+        status: true,
+        created_at: true,
+      },
+    });
+
+    logger.info(`Admin ${adminId} updated by ${req.user!.email}`);
+
+    res.json({ success: true, data: updated });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// DELETE /api/v1/admin/admins/:id - Remove admin
+router.delete('/admins/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const adminId = req.params.id;
+
+    // Prevent deleting yourself
+    if (adminId === req.user!.id) {
+      res.status(400).json({ success: false, error: 'You cannot delete your own admin account' });
+      return;
+    }
+
+    // Check if admin exists
+    const existing = await prisma.user.findFirst({
+      where: { id: adminId, role: 'ADMIN' },
+    });
+
+    if (!existing) {
+      res.status(404).json({ success: false, error: 'Admin not found' });
+      return;
+    }
+
+    // Delete the admin user
+    await prisma.user.delete({
+      where: { id: adminId },
+    });
+
+    logger.info(`Admin ${adminId} deleted by ${req.user!.email}`);
+
+    res.json({ success: true, message: 'Admin deleted successfully' });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ============ JOB MANAGEMENT ROUTES ============
 
 // GET /api/v1/admin/jobs
 router.get('/jobs', validatePagination, async (req: AuthenticatedRequest, res: Response) => {
@@ -106,8 +403,11 @@ router.put('/jobs/:id/approve', async (req: AuthenticatedRequest, res: Response)
 router.put('/jobs/:id/reject', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { reason } = req.body;
-    if (!reason) { res.status(400).json({ success: false, error: 'Rejection reason required' }); return; }
-    const job = await jobService.approveJob(req.user!.id, req.params.id, false, reason);
+    if (!reason) { 
+      res.status(400).json({ success: false, error: 'Rejection reason required' }); 
+      return; 
+    }
+    const job = await jobService.rejectJob(req.user!.id, req.params.id, reason);
     res.json({ success: true, message: 'Job rejected', data: job });
   } catch (error: any) {
     res.status(error.statusCode || 500).json({ success: false, error: error.message });
@@ -123,6 +423,8 @@ router.delete('/jobs/:id', async (req: AuthenticatedRequest, res: Response) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+// ============ EMPLOYER MANAGEMENT ROUTES ============
 
 // GET /api/v1/admin/employers
 router.get('/employers', validatePagination, async (req: AuthenticatedRequest, res: Response) => {
@@ -170,6 +472,8 @@ router.put('/employers/:id/verify', async (req: AuthenticatedRequest, res: Respo
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+// ============ CONTENT MANAGEMENT ROUTES ============
 
 // GET /api/v1/admin/content
 router.get('/content', validatePagination, async (req: AuthenticatedRequest, res: Response) => {
