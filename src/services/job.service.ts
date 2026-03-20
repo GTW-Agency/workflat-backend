@@ -10,7 +10,7 @@ import logger from '../config/logger';
 // before they ever reach Prisma, preventing PrismaClientValidationError crashes.
 const ALLOWED_JOB_FIELDS = new Set([
   'title',
-  'custom_company_name',  // Add this
+  'custom_company_name',
   'description',
   'requirements',
   'responsibilities',
@@ -42,7 +42,7 @@ function sanitizeJobData(raw: Record<string, unknown>): Record<string, unknown> 
 
 // ─── Service ──────────────────────────────────────────────────────────────────
 export class JobService {
- async createJob(userId: string, rawJobData: any, isAdmin = false) {
+async createJob(userId: string, rawJobData: any, isAdmin = false) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     include: {
@@ -61,7 +61,6 @@ export class JobService {
     throw new Error('Only employers can post jobs');
   }
 
-  // Strip unknown fields before any further processing.
   const jobData = sanitizeJobData(rawJobData);
 
   if (!isAdmin) {
@@ -73,31 +72,12 @@ export class JobService {
     const planType = subscription?.plan_type || 'FREE';
     const limits = getPlanLimits(planType);
 
-    // Count jobs posted this month
-    const startOfMonth = new Date();
-    startOfMonth.setDate(1);
-    startOfMonth.setHours(0, 0, 0, 0);
-
-    const monthlyJobs = await prisma.job.count({
-      where: {
-        employer_id: user.employerProfile.id,
-        created_at: { gte: startOfMonth },
-        status: { notIn: ['DRAFT', 'REJECTED'] },
-      },
-    });
-
-    if (monthlyJobs >= limits.jobs) {
-      throw Object.assign(
-        new Error('Monthly job posting limit reached. Please upgrade your plan.'),
-        { statusCode: 403 }
-      );
-    }
-
+    // Check featured job limit
     if (jobData.visibility === 'FEATURED') {
       const featuredUsed = subscription?.featured_jobs_used || 0;
       if (featuredUsed >= limits.featured) {
         throw Object.assign(
-          new Error('Featured job limit reached for your plan.'),
+          new Error('Featured job limit reached for your plan. Please upgrade.'),
           { statusCode: 403 }
         );
       }
@@ -110,19 +90,38 @@ export class JobService {
     }
 
     jobData.employer_id = user.employerProfile.id;
-    jobData.expires_at = jobData.expires_at ?? new Date(Date.now() + limits.duration * 24 * 60 * 60 * 1000);
+    
+    // Set expiration based on selected duration
+    const expiresInDays = rawJobData.expires_in_days || 30;
+    jobData.expires_at = new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000);
     jobData.status = 'PENDING_APPROVAL';
   } else {
     jobData.posted_by_admin = true;
     jobData.admin_id = userId;
     jobData.status = 'ACTIVE';
     jobData.published_at = new Date();
+    
+    // If employer_id is provided, assign to that employer
+    if (rawJobData.employer_id) {
+      const employer = await prisma.employerProfile.findUnique({
+        where: { id: rawJobData.employer_id }
+      });
+      if (employer) {
+        jobData.employer_id = rawJobData.employer_id;
+      }
+    }
+    
+    // Set expiration based on selected duration
+    const expiresInDays = rawJobData.expires_in_days || 30;
+    jobData.expires_at = new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000);
   }
 
   const job = await prisma.job.create({ data: jobData as any });
   logger.info(`Job created: ${job.id} by user: ${userId}`);
   return job;
 }
+
+
 
   async approveJob(adminId: string, jobId: string, approved: boolean, rejectionReason?: string) {
     const job = await prisma.job.findUnique({
